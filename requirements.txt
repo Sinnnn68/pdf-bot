@@ -1,5 +1,0 @@
-python-telegram-bot==20.7
-PyMuPDF
-deep-translator
-arabic-reshaper
-python-bidi
