@@ -1,7 +1,8 @@
 pyTelegramBotAPI
 pdfplumber
-pypdfium2
 reportlab
+pypdfium2
 requests
+deep-translator
 arabic-reshaper
 python-bidi
