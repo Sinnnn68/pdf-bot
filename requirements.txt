@@ -2,6 +2,6 @@ pyTelegramBotAPI
 pdfplumber
 pypdfium2
 reportlab
+requests
 arabic-reshaper
 python-bidi
-requests
