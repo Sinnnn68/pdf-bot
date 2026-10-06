@@ -1,7 +1,3 @@
-pyTelegramBotAPI
-PyMuPDF
+python-telegram-bot
+pypdf
 requests
-fpdf2
-arabic-reshaper
-python-bidi
-deep-translator
