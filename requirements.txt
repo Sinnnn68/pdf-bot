@@ -1,3 +1,6 @@
 python-telegram-bot
 pypdf
 requests
+pdfplumber
+fpdf2
+arabic-reshaper
