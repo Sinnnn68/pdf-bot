@@ -164,8 +164,7 @@ def process(m):
             res = tr.translate_all(texts, prog)
             ok = sum(1 for r in res if r)
             if ok == 0:
-                say(chat, "❌ فشلت الترجمة بالكامل.\nالسبب: " + (tr.last_error or "غير معروف")
-                    + "\nانتظر دقيقة وأعد إرسال الملف (الفقرات المترجمة تنحفظ).", status)
+                                say(chat, "❌ فشلت الترجمة بالكامل. الأسباب:\n" + tr.all_errors()                    + "\nانتظر دقيقة وأعد إرسال الملف (الفقرات المترجمة تنحفظ).", status)
                 return
             say(chat, "⏳ أبني ملف الـ PDF...", status)
             base = re.sub(r"[^\w\-. ]", "_", os.path.splitext(m.document.file_name)[0])
