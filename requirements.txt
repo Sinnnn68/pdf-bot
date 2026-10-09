@@ -1,13 +1,4 @@
-Flask==3.1.3            # web service
-gunicorn==26.2.0        # production WSGI server (Procfile)
-Werkzeug>=3.0           # Flask's WSGI toolkit (pulled in by Flask)
-
-# --- PDF engine: in-place editing, redaction, text insertion, rendering -----
-PyMuPDF==1.28.2         # imported as `pymupdf` / `fitz` - the core of v4
-
-# --- Arabic text handling ---------------------------------------------------
-arabic-reshaper==3.0.1
-python-bidi==0.6.11
-
-# --- HTTP client for the real translation API (optional at runtime) ---------
-requests==2.34.2
+PyMuPDF
+deep-translator
+pyTelegramBotAPI
+requests
