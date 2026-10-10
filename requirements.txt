@@ -1,8 +1,9 @@
-pyTelegramBotAPI==4.37.0     # مكتبة البوت (import telebot)
-PyMuPDF==1.28.2              # معالجة PDF (import fitz / pymupdf)
-deep-translator==1.11.4      # خدمة Google المجانية (بلا مفتاح)
-requests==2.34.2             # MyMemory / Gemini / Groq / LibreTranslate
-
-# --- مطلوبة لكتابة النص العربي داخل PDF (RTL) ------------------------------
-arabic-reshaper==3.0.1
-python-bidi==0.6.11
+pyTelegramBotAPI==4.29.1
+PyMuPDF==1.26.1
+deep-translator==1.11.4
+requests==2.32.3
+arabic-reshaper==3.0.0
+python-bidi==0.6.6
+python-docx==1.1.2
+python-pptx==1.0.2
+openpyxl==3.1.5
