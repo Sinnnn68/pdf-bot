@@ -52,6 +52,46 @@ GOOGLE_FREE_HOSTS = [
     "https://clients5.google.com/translate_a/t",
 ]
 
+# محارف العرض العربية (Arabic Presentation Forms) - تظهر فقط عند فشل تشكيل
+# الحروف، وأي نص عربي حقيقي لا يحتاجها. وجودها = ردّ مشوّه من الخدمة.
+_PRESENTATION_FORMS = re.compile(r"[\uFB50-\uFDFF\uFE70-\uFEFF]")
+
+
+def _parse_clients5(d) -> str:
+    """يحلّل ردّ clients5.google.com/translate_a/t.
+
+    الشكل: [["النص المترجم","en"]]  أو  [["جزء1","en"],["جزء2","en"]]
+    أو نصّ مفرد. نأخذ العنصر الأول من كل زوج (النص المترجم) لا الحرف الأول.
+    """
+    if isinstance(d, str):
+        return d
+    if not isinstance(d, list) or not d:
+        return ""
+    parts = []
+    for seg in d:
+        if isinstance(seg, str):
+            parts.append(seg)
+        elif isinstance(seg, list) and seg and isinstance(seg[0], str):
+            parts.append(seg[0])
+    return "".join(parts)
+
+
+def _looks_broken(src: str, out: str) -> bool:
+    """True إذا كان ردّ الخدمة مشوّهاً (حروف مقطّعة/مقلوبة/مفقودة)."""
+    if not out or not out.strip():
+        return True
+    if _PRESENTATION_FORMS.search(out):
+        return True
+    # نصّ عربي حقيقي يجب أن يكون بطول معقول مقابل المصدر
+    src_words = len(str(src).split())
+    out_words = len(str(out).split())
+    if src_words >= 2 and out_words < max(1, src_words // 2):
+        return True
+    # نسبة الحروف العربية مقابل اللاتينية: ترجمة عربية حقيقية تغلبها العربية
+    if arabic_ratio(out) < 0.35 and arabic_ratio(src) < 0.1:
+        return True
+    return False
+
 LANG_NAMES = {
     "ar": "Arabic", "en": "English", "fr": "French", "de": "German",
     "tr": "Turkish", "es": "Spanish", "ru": "Russian", "fa": "Persian",
@@ -514,9 +554,7 @@ class Translator:
                                          timeout=self.timeout)
                         r.raise_for_status()
                         d = r.json()
-                        out = d[0] if (isinstance(d, list) and d and isinstance(d[0], str)) else ""
-                        if not out and isinstance(d, list) and d and isinstance(d[0], list):
-                            out = "".join(seg[0] for seg in d[0] if seg)
+                        out = _parse_clients5(d)
                     else:
                         r = requests.get(host, params={"client": "gtx", "sl": sl,
                                                        "tl": self.target, "dt": "t", "q": text},
@@ -525,8 +563,10 @@ class Translator:
                         r.raise_for_status()
                         d = r.json()
                         out = "".join(seg[0] for seg in d[0] if seg and seg[0])
-                    if out and out.strip():
+                    if out and out.strip() and not _looks_broken(text, out):
                         return out.strip()
+                    if out and out.strip():
+                        last = f"ردّ مشوّه: {out.strip()[:60]!r}"
                 except Exception as exc:
                     last = exc
             self._sleep(0.8 * (attempt + 1))
@@ -548,6 +588,8 @@ class Translator:
             if (not t.strip() or "MYMEMORY WARNING" in up or "QUERY LENGTH" in up
                     or "INVALID" in up or int(data.get("responseStatus", 200) or 200) >= 400):
                 raise RuntimeError(f"MyMemory رد غير صالح: {t[:80]}")
+            if _looks_broken(part, t):
+                raise RuntimeError(f"MyMemory ردّ مشوّه: {t[:60]!r}")
             outs.append(t.strip())
             time.sleep(0.3)
         return " ".join(outs)
