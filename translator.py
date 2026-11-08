@@ -77,18 +77,24 @@ def _parse_clients5(d) -> str:
 
 
 def _looks_broken(src: str, out: str) -> bool:
-    """True إذا كان ردّ الخدمة مشوّهاً (حروف مقطّعة/مقلوبة/مفقودة)."""
+    """True إذا كان ردّ الخدمة مشوّهاً (حروف مقطّعة/مقلوبة/مفقودة).
+
+    مهم: الترجمة العربية الصحيحة قد تحتفظ بمصطلحات لاتينية (diastereomers,
+    enantiomers, chirality, R/S) فتنخفض نسبة العربية. لذلك لا نرفض النص
+    بسبب نسبة العربية وحدها — نرفض فقط إذا كان النص *بلا عربية إطلاقاً*
+    أو كان أقصر بكثير من المصدر (اقتطاع).
+    """
     if not out or not out.strip():
         return True
     if _PRESENTATION_FORMS.search(out):
         return True
-    # نصّ عربي حقيقي يجب أن يكون بطول معقول مقابل المصدر
+    # لا حرف عربي واحد ⇒ الخدمة أعادت النص كما هو (لم تترجم)
+    if not has_arabic(out):
+        return True
+    # اقتطاع واضح: نص عربي قصير جداً مقابل مصدر طويل
     src_words = len(str(src).split())
     out_words = len(str(out).split())
-    if src_words >= 2 and out_words < max(1, src_words // 2):
-        return True
-    # نسبة الحروف العربية مقابل اللاتينية: ترجمة عربية حقيقية تغلبها العربية
-    if arabic_ratio(out) < 0.35 and arabic_ratio(src) < 0.1:
+    if src_words >= 4 and out_words < max(1, src_words // 3):
         return True
     return False
 
@@ -677,12 +683,16 @@ class Translator:
                         return " ".join(str(x).split()).casefold()
 
                     def _untranslated(a, b):
-                        """True إن أعادت الخدمة المقطع الإنجليزي كما هو (نسخ بلا ترجمة)."""
+                        """True إن أعادت الخدمة المقطع الإنجليزي كما هو (نسخ بلا ترجمة).
+
+                        لا نعتبر المقطع "غير مترجم" لمجرد احتوائه كلمات لاتينية
+                        (diastereomers / enantiomers / R / S) — يكفي وجود عربية.
+                        """
                         if not _norm(a):
                             return False
                         if _norm(a) == _norm(b):
                             return True
-                        return arabic_ratio(str(a)) < 0.06 and bool(LATIN_RE.search(str(b)))
+                        return not has_arabic(str(a))
 
                     unchanged = sum(1 for a, b in zip(out, pending) if _untranslated(a, b))
                     if unchanged > max(1, len(pending) // 3):

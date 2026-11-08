@@ -168,12 +168,26 @@ def build_bot(token: str):
                      f"الصيغة: {report.get('kind')}"]
             if report.get("pages"):
                 lines.append(f"الصفحات: {report['pages']}")
-            lines.append(f"المقاطع المترجمة: {report.get('translated_blocks', report.get('translated', 0))}")
+            n_tr = report.get("translated_blocks", report.get("translated", 0)) or 0
+            lines.append(f"المقاطع المترجمة: {n_tr}")
             if report.get("kind") == "pdf":
                 lines.append(f"الصور محفوظة: {'نعم' if report.get('images_preserved') else 'لا'}")
+                ocr_pages = sum(1 for d in (report.get("pages_detail") or []) if d.get("ocr"))
+                if ocr_pages:
+                    lines.append(f"صفحات قُرئت بـ OCR: {ocr_pages}")
             if report.get("source_pages") is not None and report.get("kind") == "pdf":
                 if report["source_pages"] == 0:
                     lines.append("ℹ️ الملف عربي أصلاً - لم تُضف ترجمة.")
+            # تحذير صريح: لا نص قابل للترجمة (ملف صور بلا OCR أو نص غير واضح)
+            if n_tr == 0 and report.get("kind") == "pdf":
+                lines = ["⚠️ لم أجد نصاً قابلاً للترجمة في هذا الملف.",
+                         f"الصفحات: {report.get('pages')}",
+                         "",
+                         "السبب المحتمل: الملف صور ممسوحة (scanned) بجودة منخفضة، "
+                         "أو النص داخل الصور فقط.",
+                         "الحل: أرسل نسخة أوضح، أو أضف GEMINI_API_KEY لقراءة الصور."]
+                bot.send_message(message.chat.id, "\n".join(lines))
+                return
             lines.append("")
             lines.append(quality)
             errs = translator.all_errors()

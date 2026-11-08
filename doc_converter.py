@@ -184,11 +184,49 @@ def _txt(inp: Path, out: Path, translator) -> dict:
 # ==========================================================================
 def _image(inp: Path, out: Path, translator) -> dict:
     key = os.getenv("GEMINI_API_KEY", "").strip()
-    if not key:
-        raise RuntimeError("ترجمة الصور تحتاج GEMINI_API_KEY (قراءة الصورة). "
-                           "أضفه في متغيّرات البيئة.")
+    text = ""
+
+    # 1) المسار المفضّل: Gemini (يقرأ الصورة ويفهمها)
+    if key:
+        try:
+            text = _image_via_gemini(inp, translator, key)
+        except Exception as exc:
+            log.warning("Gemini لقراءة الصورة فشل: %s", exc)
+            text = ""
+
+    # 2) بديل بلا مفتاح: Tesseract OCR محلي
+    if not text.strip():
+        try:
+            import ocr as _ocr
+            if _ocr.available():
+                text = _ocr.ocr_image_file(inp)
+                if text.strip():
+                    log.info("قُرئت الصورة بـ OCR المحلي (%d حرف)", len(text))
+        except Exception as exc:
+            log.warning("OCR المحلي للصورة فشل: %s", exc)
+
+    if not text.strip():
+        raise RuntimeError(
+            "تعذّرت قراءة نص من الصورة. أضف GEMINI_API_KEY لقراءة الصور، "
+            "أو تأكد أن الصورة تحتوي نصاً واضحاً (OCR محلي).")
+
+    # 3) ترجمة النص المقروء
+    tr = translator.translate(text) or text
+
+    import pymupdf as fitz
+    from translate_pdf import _draw_ar
+    doc = fitz.open()
+    pg = doc.new_page(width=595, height=842)
+    rect = fitz.Rect(40, 40, 555, 800)
+    _draw_ar(pg, rect, tr, 13, "#000000")
+    doc.save(str(out))
+    return {"kind": "image->pdf", "out": str(out), "translated": 1, "pages": 1,
+            "images_before": 1, "images_after": 0, "images_preserved": False}
+
+
+def _image_via_gemini(inp: Path, translator, key: str) -> str:
+    """يقرأ نص الصورة عبر Gemini (يحتاج GEMINI_API_KEY)."""
     import base64
-    import json as _json
     import requests
 
     b64 = base64.b64encode(inp.read_bytes()).decode()
@@ -201,24 +239,14 @@ def _image(inp: Path, out: Path, translator) -> dict:
     if not model:
         raise RuntimeError("تعذّر تحديد موديل Gemini لقراءة الصورة.")
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-    prompt = ("Read all the text in this image, then translate it into clear Arabic "
-              "and write the result as a plain text PDF-ready page.")
+    prompt = ("Read all the text in this image and return it exactly as plain text, "
+              "preserving line breaks. Do not translate and do not add commentary.")
     body = {"contents": [{"parts": [{"text": prompt},
                                     {"inline_data": {"mime_type": mime, "data": b64}}]}],
             "generationConfig": {"temperature": 0.0}}
     r = requests.post(url, params={"key": key}, json=body, timeout=90)
     r.raise_for_status()
-    text = r.json()["candidates"][0]["content"]["parts"][0]["text"]
-
-    import pymupdf as fitz
-    from translate_pdf import _draw_ar, _measure_height
-    doc = fitz.open()
-    pg = doc.new_page(width=595, height=842)
-    rect = fitz.Rect(40, 40, 555, 800)
-    _draw_ar(pg, rect, text, 13, "#000000")
-    doc.save(str(out))
-    return {"kind": "image->pdf", "out": str(out), "translated": 1, "pages": 1,
-            "images_before": 1, "images_after": 0, "images_preserved": False}
+    return r.json()["candidates"][0]["content"]["parts"][0]["text"]
 
 
 # ==========================================================================

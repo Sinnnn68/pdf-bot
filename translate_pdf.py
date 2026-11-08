@@ -32,6 +32,11 @@ import pymupdf as fitz
 
 from translator import has_arabic, arabic_ratio, polish_text
 
+try:
+    import ocr as _ocr
+except Exception:                                   # pragma: no cover
+    _ocr = None
+
 log = logging.getLogger("translate_pdf")
 
 
@@ -353,6 +358,64 @@ def _translate_all(translator, texts):
     return [translator.translate(t) for t in texts]
 
 
+def _ocr_segments(page) -> list[dict]:
+    """يبني مقاطع من صفحة ممسوحة عبر Tesseract (بلا طبقة نص).
+
+    يرجّع نفس شكل _segments: text / ink_top / ink_bottom / en_size / x0 / x1
+    """
+    if _ocr is None or not _ocr.available():
+        return []
+    try:
+        _text, lines = _ocr.ocr_pdf_page(page)
+    except Exception as exc:
+        log.warning("OCR للصفحة فشل: %s", exc)
+        return []
+    if not lines:
+        return []
+
+    rows = []
+    for (x0, y0, x1, y1, t) in lines:
+        t = (t or "").strip()
+        if not t:
+            continue
+        h = max(1.0, float(y1) - float(y0))
+        rows.append({"x0": float(x0), "x1": float(x1),
+                     "top": float(y0), "bottom": float(y1),
+                     "size": h * 0.78, "text": t})
+    if not rows:
+        return []
+    rows.sort(key=lambda r: (r["top"], r["x0"]))
+
+    # تجميع الأسطر المتقاربة عمودياً في فقرة واحدة
+    segs: list[dict] = []
+    cur = [rows[0]]
+    for r in rows[1:]:
+        prev = cur[-1]
+        gap = r["top"] - prev["bottom"]
+        same_col = abs(r["x0"] - prev["x0"]) < 0.25 * max(1.0, prev["x1"] - prev["x0"])
+        if gap <= max(2.0, 0.6 * prev["size"]) and same_col:
+            cur.append(r)
+        else:
+            segs.append(cur)
+            cur = [r]
+    segs.append(cur)
+
+    out: list[dict] = []
+    for seg in segs:
+        text = "\n".join(r["text"] for r in seg).strip()
+        if not _has_real_text(text):
+            continue
+        out.append({
+            "text": text,
+            "ink_top": min(r["top"] for r in seg),
+            "ink_bottom": max(r["bottom"] for r in seg),
+            "en_size": max(r["size"] for r in seg),
+            "x0": min(r["x0"] for r in seg),
+            "x1": max(r["x1"] for r in seg),
+        })
+    return out
+
+
 # ==========================================================================
 # 5) وضع "الترجمة أسفل النص" (below) - إعادة بناء الصفحة بحفظ كل المحتوى
 # ==========================================================================
@@ -385,16 +448,20 @@ def _below_page(out_doc, src_doc, pno: int, translator) -> dict:
               if b.get("type") == 0 and _block_text(b)]
     to_tr = [b for b in blocks if detect_lang(_block_text(b)) != "ar"]
 
-    if not to_tr:
-        out_doc.insert_pdf(src_doc, from_page=pno, to_page=pno)
-        return {"page": pno + 1, "translated": 0, "added_h": 0.0, "skipped": "no-source"}
-
     segs: list[dict] = []
     for b in to_tr:
         segs.extend(_segments(b))
+
+    # صفحة ممسوحة (بلا طبقة نص) ⇒ نقرأها بـ OCR بدل تخطّيها
+    used_ocr = False
+    if not segs and _ocr is not None and _ocr.page_needs_ocr(src):
+        segs = _ocr_segments(src)
+        used_ocr = bool(segs)
+
     if not segs:
         out_doc.insert_pdf(src_doc, from_page=pno, to_page=pno)
-        return {"page": pno + 1, "translated": 0, "added_h": 0.0, "skipped": "no-latin"}
+        return {"page": pno + 1, "translated": 0, "added_h": 0.0,
+                "skipped": "no-source"}
 
     trs = _translate_all(translator, [s["text"] for s in segs])
     groups = _group_segments(segs, W)
@@ -475,7 +542,8 @@ def _below_page(out_doc, src_doc, pno: int, translator) -> dict:
             if _draw_ar(page, rect, s["tr"], s["size"], AR_COLOR):
                 drawn += 1
 
-    return {"page": pno + 1, "translated": drawn, "added_h": round(total_h, 1)}
+    return {"page": pno + 1, "translated": drawn, "added_h": round(total_h, 1),
+            "ocr": used_ocr}
 
 
 # ==========================================================================
