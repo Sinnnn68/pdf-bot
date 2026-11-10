@@ -143,17 +143,21 @@ def _xlsx(inp: Path, out: Path, translator) -> dict:
         if not texts:
             continue
         trs = translator.translate_all(texts)
-        # نضع الترجمة في العمود التالي على يمين الجدول (عمود جديد)
-        col = ws.max_column + 2
-        ws.cell(row=1, column=col, value="الترجمة العربية").font = Font(bold=True, color="9E1B1B")
+        # نُنسخ الجدول جانبياً: كل خلية مصدر تُترجم إلى الخلية المقابلة لها
+        # في كتلة جديدة على يمين الجدول (نفس الصف ونفس الترتيب) — حتى لا
+        # تمسح ترجمات الصف الواحد بعضها.
+        base = ws.max_column + 2
+        ws.cell(row=1, column=base, value="الترجمة العربية").font = Font(bold=True, color="9E1B1B")
         for c, tr in zip(cells, trs):
-            if tr.strip():
-                ws.cell(row=c.row, column=col, value=tr).font = Font(color="9E1B1B")
+            if tr and tr.strip():
+                target_col = base + (c.column - 1)
+                ws.cell(row=c.row, column=target_col, value=tr).font = Font(color="9E1B1B")
                 n += 1
-        try:
-            ws.column_dimensions[get_column_letter(col)].width = 45
-        except Exception:
-            pass
+        for off in range(ws.max_column - base + 1):
+            try:
+                ws.column_dimensions[get_column_letter(base + off)].width = 45
+            except Exception:
+                pass
     wb.save(str(out))
     return {"kind": "xlsx", "out": str(out), "translated": n, "pages": None,
             "images_before": 0, "images_after": 0, "images_preserved": True}
@@ -214,14 +218,52 @@ def _image(inp: Path, out: Path, translator) -> dict:
     tr = translator.translate(text) or text
 
     import pymupdf as fitz
-    from translate_pdf import _draw_ar
+    from translate_pdf import _draw_ar, _measure_height
+
+    # نُبقي الصورة الأصلية في أعلى الصفحة، والترجمة العربية تحتها مباشرة
+    try:
+        from PIL import Image as _PILImage
+        with _PILImage.open(inp) as _im:
+            iw, ih = _im.size
+    except Exception:
+        iw, ih = 1000, 1400
+
+    PAGE_W = 595.0
+    MARGIN = 30.0
+    img_w = PAGE_W - 2 * MARGIN
+    img_h = img_w * (ih / iw) if iw else img_w
+    # لا نجعل الصورة أطول من صفحة A4 كاملة
+    max_img_h = 842.0 - 2 * MARGIN
+    if img_h > max_img_h:
+        scale = max_img_h / img_h
+        img_h *= scale
+        img_w *= scale
+
+    ar_size = 12.0
+    ar_h = _measure_height(tr, ar_size, PAGE_W - 2 * MARGIN, "#000000", cap=6000)
+    page_h = MARGIN + img_h + 18 + ar_h + MARGIN
+    page_h = max(page_h, 300.0)
+
     doc = fitz.open()
-    pg = doc.new_page(width=595, height=842)
-    rect = fitz.Rect(40, 40, 555, 800)
-    _draw_ar(pg, rect, tr, 13, "#000000")
+    pg = doc.new_page(width=PAGE_W, height=page_h)
+    img_rect = fitz.Rect(MARGIN, MARGIN, MARGIN + img_w, MARGIN + img_h)
+    # نُدرج الصورة كـ JPEG مضغوط حتى لا يتضخّم حجم الـ PDF
+    try:
+        import io
+        from PIL import Image as _PILImage2
+        with _PILImage2.open(inp) as _im2:
+            _rgb = _im2.convert("RGB")
+            _buf = io.BytesIO()
+            _rgb.save(_buf, format="JPEG", quality=88, optimize=True)
+        pg.insert_image(img_rect, stream=_buf.getvalue())
+    except Exception:
+        pg.insert_image(img_rect, filename=str(inp))
+    ar_rect = fitz.Rect(MARGIN, MARGIN + img_h + 18,
+                        PAGE_W - MARGIN, page_h - MARGIN)
+    _draw_ar(pg, ar_rect, tr, ar_size, "#000000")
     doc.save(str(out))
     return {"kind": "image->pdf", "out": str(out), "translated": 1, "pages": 1,
-            "images_before": 1, "images_after": 0, "images_preserved": False}
+            "images_before": 1, "images_after": 1, "images_preserved": True}
 
 
 def _image_via_gemini(inp: Path, translator, key: str) -> str:
